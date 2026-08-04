@@ -364,6 +364,34 @@ check($G, 'multi-letter tokens are left to the engine',
       && translit_letter_candidates('Raj') === null,
       'PK and Raj not treated as initials');
 
+/* Brahmic script conversion. Pure function, so these run offline too. */
+
+check($G, 'Malayalam converts to Devanagari by codepoint offset',
+      translit_script_to_devanagari('ശശിധരൻ', 'ml') === 'शशिधरन',
+      'ശശിധരൻ -> ' . translit_script_to_devanagari('ശശിധരൻ', 'ml'));
+
+check($G, 'chillu letters become consonant + virama',
+      translit_script_to_devanagari('വര്ഗീസ്', 'ml') === 'वर्गीस'
+      && translit_script_to_devanagari('അയ്യർ', 'ml') === 'अय्यर',
+      'വര്ഗീസ് -> ' . translit_script_to_devanagari('വര്ഗീസ്', 'ml')
+      . ', അയ്യർ -> ' . translit_script_to_devanagari('അയ്യർ', 'ml'));
+
+check($G, 'an unsupported script is returned untouched',
+      translit_script_to_devanagari('abc', 'xx') === 'abc'
+      && translit_script_to_devanagari('राज', 'ml') === 'राज',
+      'no mangling of input it does not handle');
+
+if (!$probe['offline'] && !empty($CONFIG['translit']['source_hint'])) {
+    // The Hindi model cannot produce these at any rank; the hint language can,
+    // and interleaving must surface it near the top rather than bury it.
+    $sas = translit_word('Sasidharan');
+    $pos = array_search('शशिधरन', $sas['candidates'], true);
+    check($G, 'a South Indian name the Hindi model misses is reachable near the top',
+          $pos !== false && $pos < 3,
+          $pos === false ? 'absent: ' . implode(' ', array_slice($sas['candidates'], 0, 5))
+                         : 'शशिधरन at #' . ($pos + 1));
+}
+
 /* Learned spellings. Uses nonsense words so a real name is never affected,
  * and clears them again below. */
 
@@ -415,6 +443,16 @@ try {
  * ---------------------------------------------------------------- */
 foreach ($inserted_ids as $id) {
     person_delete($id);
+}
+
+// person_insert() now teaches translit_learned, so the round-trip rows above
+// taught bogus pairs from the "__selftest" tag (the tokenizer drops the
+// underscores, leaving the word "selftest"). Remove them, or every run would
+// leave permanent junk in the learned data.
+try {
+    db()->prepare('DELETE FROM translit_learned WHERE word_en = ?')->execute(array('selftest'));
+} catch (PDOException $ex) {
+    // non-fatal
 }
 $left = db()->query("SELECT COUNT(*) FROM persons WHERE name_en = '__selftest'")->fetchColumn();
 check('Cleanup', 'test rows removed', ((int) $left) === 0, $left . ' left behind');

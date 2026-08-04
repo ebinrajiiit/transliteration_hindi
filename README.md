@@ -66,6 +66,7 @@ file:
 | `TRANSLIT_DB_USER` | `root` |
 | `TRANSLIT_DB_PASS` | *(empty)* |
 | `TRANSLIT_ENDPOINT` | Google Input Tools URL |
+| `TRANSLIT_SOURCE_HINT` | `ml` — second source language (see below); empty disables |
 | `TRANSLIT_DEBUG` | `1` — set to `0` in production |
 
 ---
@@ -129,6 +130,27 @@ matra (a dependent vowel sign), which no Devanagari word can do. The correct
 `एबिन` is third. `translit_rank_candidates()` demotes any candidate starting
 with a Unicode Mark rather than dropping it, so the upstream ordering is still
 reachable in the picker. Without this, `Ebin Deni Raj` fills in as `ेबिन देनी राज`.
+
+**The Hindi model is weak on South Indian names, so a second language is
+consulted.** Measured on 12 Malayalam-origin surnames, the Hindi endpoint put
+only 3 first and could not produce 6 *at any rank* — `Varghese`, `Iyer`,
+`Sasidharan` and `Mathew` were simply unavailable. Google's **Malayalam** model
+gets those right, and Malayalam→Devanagari is a deterministic script conversion
+(both are Brahmic, offset 0x400), so `translit_script_to_devanagari()` converts
+rather than guesses. Both languages are queried **in parallel**, so the second
+costs no extra wall-clock, and the two candidate lists are **interleaved** —
+appending would bury the right spelling below all five Hindi guesses. Result:
+every one of the 12 became reachable in the top 3, none absent.
+
+Set `TRANSLIT_SOURCE_HINT` to `ta`, `te`, `kn`, `bn`, `gu`, `pa` or `or`
+elsewhere, or empty to query Hindi alone.
+
+**The app learns from what you approve.** A saved record teaches its word pairs
+(`Nair`→`नायर`), and later lookups offer the approved spelling first with the
+engine's guesses behind it. Alignment is positional and only attempted when both
+sides have the same word count — otherwise nothing is learned, because a wrong
+pair would be served to everyone. Ranking is by approval count, so a repeated
+spelling outweighs a one-off. This is what fixes the remaining cases permanently.
 
 **Spelling is genuinely ambiguous, so nothing is stored silently.** `Deni`
 offers `देनी | देनि | डेनी | देणी | डैनी`. The Hindi field is always editable, every

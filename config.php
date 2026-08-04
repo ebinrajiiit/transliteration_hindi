@@ -35,6 +35,20 @@ return array(
         // mirror without a code change — and so the offline path is testable.
         'endpoint'        => env_or('TRANSLIT_ENDPOINT', 'https://inputtools.google.com/request'),
         'itc'             => 'hi-t-i0-und',
+
+        // Second source language to consult, converted to Devanagari afterwards.
+        //
+        // Google's Hindi model is trained mostly on Hindi-belt names and is weak
+        // on South Indian ones. Measured on 10 Malayalam-origin surnames it put
+        // only 3 first and could not produce 6 at any rank — but the Malayalam
+        // model gets those right, and Malayalam to Devanagari is a deterministic
+        // script conversion. Consulting both roughly doubles the candidate pool
+        // with forms derived from the name's actual source language.
+        //
+        // 'ml' suits a Kerala institution. Set TRANSLIT_SOURCE_HINT to another
+        // code (ta, te, kn, bn, gu, pa, or) elsewhere, or to an empty string to
+        // query Hindi alone.
+        'source_hint'     => env_or('TRANSLIT_SOURCE_HINT', 'ml'),
         'num_candidates'  => 5,
         // Must never block a form submit.
         'connect_timeout' => 3,

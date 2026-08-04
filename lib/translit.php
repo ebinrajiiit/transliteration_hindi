@@ -128,6 +128,63 @@ function translit_letter_candidates($word)
 }
 
 /* ------------------------------------------------------------------ *
+ * Brahmic script conversion
+ * ------------------------------------------------------------------ */
+
+/**
+ * Convert another Brahmic script to Devanagari.
+ *
+ * Indic scripts descend from Brahmi and share a codepoint layout, so each block
+ * maps to Devanagari by a fixed offset — Malayalam ക U+0D15 is Devanagari क
+ * U+0915, exactly 0x400 apart. This is a script conversion, not a guess: the
+ * same sound, written in a different alphabet.
+ *
+ * Why bother: Google's Hindi model is weak on South Indian names, while its
+ * Malayalam model handles them well. Routing through the name's real source
+ * language and converting the script afterwards recovers spellings the Hindi
+ * model cannot produce at any rank (Varghese, Iyer, Sasidharan, Mathew).
+ *
+ * @param string $s     Text in the source script.
+ * @param string $lang  Source language code, e.g. 'ml'.
+ * @return string       Devanagari, or the input unchanged if unsupported.
+ */
+function translit_script_to_devanagari($s, $lang)
+{
+    // Start of each script's Unicode block; Devanagari begins at 0x0900.
+    static $blocks = array(
+        'bn' => 0x0980, 'pa' => 0x0A00, 'gu' => 0x0A80, 'or' => 0x0B00,
+        'ta' => 0x0B80, 'te' => 0x0C00, 'kn' => 0x0C80, 'ml' => 0x0D00,
+    );
+
+    if ($s === '' || !isset($blocks[$lang])) {
+        return $s;
+    }
+
+    // Chillu letters are Malayalam-only: a bare consonant with no inherent
+    // vowel. Devanagari writes that as consonant + virama, so they cannot go
+    // through the offset and are replaced first.
+    if ($lang === 'ml') {
+        $s = strtr($s, array(
+            'ൻ' => 'ന്', 'ർ' => 'ര്', 'ൽ' => 'ല്', 'ൾ' => 'ള്', 'ൺ' => 'ണ്', 'ൿ' => 'ക്',
+        ));
+    }
+
+    $base = $blocks[$lang];
+    $out  = '';
+    foreach (preg_split('//u', $s, -1, PREG_SPLIT_NO_EMPTY) as $ch) {
+        $cp = mb_ord($ch, 'UTF-8');
+        if ($cp !== false && $cp >= $base && $cp <= $base + 0x7F) {
+            $out .= mb_chr($cp - ($base - 0x0900), 'UTF-8');
+        } else {
+            $out .= $ch;
+        }
+    }
+
+    // Hindi does not write a word-final virama; Malayalam chillus produce one.
+    return preg_replace('/्$/u', '', $out);
+}
+
+/* ------------------------------------------------------------------ *
  * Learned spellings — what humans actually approved
  * ------------------------------------------------------------------ */
 
@@ -312,9 +369,61 @@ function translit_fetch_candidates($word)
         return null;
     }
 
-    $url = $c['endpoint'] . '?' . http_build_query(array(
+    // Hindi always; the hint language too when configured. Both are requested
+    // together rather than one after the other, so consulting a second language
+    // costs no extra wall-clock — the timeout budget stays as it was.
+    $langs = array('hi');
+    if (!empty($c['source_hint']) && $c['source_hint'] !== 'hi') {
+        $langs[] = $c['source_hint'];
+    }
+
+    $bodies = translit_http_get_many($word, $langs, $c);
+
+    // One ranked list per language, each already in Devanagari.
+    $lists = array();
+    foreach ($langs as $lang) {
+        if (!isset($bodies[$lang])) {
+            continue;
+        }
+        $list = array();
+        foreach (translit_parse_response($bodies[$lang]) as $cand) {
+            // Anything not already Devanagari came from the hint language and is
+            // converted by fixed codepoint offset — a script change, not a guess.
+            $dev = ($lang === 'hi') ? $cand : translit_script_to_devanagari($cand, $lang);
+            if ($dev !== '' && has_devanagari($dev)) {
+                $list[] = $dev;
+            }
+        }
+        if ($list) {
+            $lists[] = $list;
+        }
+    }
+
+    // Interleave rather than concatenate. Appending would bury every hint-language
+    // candidate below all five Hindi ones, which is where the right spelling for a
+    // South Indian name usually is — so it would never be the default and would
+    // barely be seen. Taking each list's best first keeps both engines competing
+    // at the top.
+    $out  = array();
+    $seen = array();
+    for ($i = 0; $i < $c['num_candidates']; $i++) {
+        foreach ($lists as $list) {
+            if (isset($list[$i]) && !isset($seen[$list[$i]])) {
+                $seen[$list[$i]] = true;
+                $out[] = $list[$i];
+            }
+        }
+    }
+
+    return $out ? $out : null;
+}
+
+/** Build the request URL for one word in one language. */
+function translit_request_url($word, $lang, array $c)
+{
+    return $c['endpoint'] . '?' . http_build_query(array(
         'text' => $word,
-        'itc'  => $c['itc'],
+        'itc'  => $lang . '-t-i0-und',
         'num'  => $c['num_candidates'],
         'cp'   => 0,
         'cs'   => 1,
@@ -322,36 +431,70 @@ function translit_fetch_candidates($word)
         'oe'   => 'utf-8',
         'app'  => 'demopage',
     ));
+}
 
-    $ch = curl_init($url);
-    curl_setopt_array($ch, array(
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_CONNECTTIMEOUT => $c['connect_timeout'],
-        CURLOPT_TIMEOUT        => $c['total_timeout'],
-        CURLOPT_FOLLOWLOCATION => true,
-        CURLOPT_MAXREDIRS      => 2,
-        CURLOPT_USERAGENT      => 'Mozilla/5.0 (compatible; translit-proxy/1.0)',
-    ));
-    $body = curl_exec($ch);
-    $err  = curl_errno($ch);
-    $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    // curl_close() is required to free the resource on PHP 7.x but is a
-    // deprecated no-op from 8.5. Guarded so both runtimes stay warning-free.
-    if (PHP_VERSION_ID < 80000) {
-        curl_close($ch);
+/**
+ * Fetch several languages concurrently.
+ *
+ * @return array  lang => response body, only for requests that returned 200.
+ */
+function translit_http_get_many($word, array $langs, array $c)
+{
+    $multi   = curl_multi_init();
+    $handles = array();
+
+    foreach ($langs as $lang) {
+        $ch = curl_init(translit_request_url($word, $lang, $c));
+        curl_setopt_array($ch, array(
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_CONNECTTIMEOUT => $c['connect_timeout'],
+            CURLOPT_TIMEOUT        => $c['total_timeout'],
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_MAXREDIRS      => 2,
+            CURLOPT_USERAGENT      => 'Mozilla/5.0 (compatible; translit-proxy/1.0)',
+        ));
+        curl_multi_add_handle($multi, $ch);
+        $handles[$lang] = $ch;
     }
 
-    if ($err !== 0 || $code !== 200 || $body === false || $body === '') {
-        return null;
-    }
+    do {
+        $status = curl_multi_exec($multi, $running);
+        if ($running) {
+            curl_multi_select($multi, 1.0);
+        }
+    } while ($running && $status === CURLM_OK);
 
-    // Expected: ["SUCCESS",[["ebin",["एबिन","एबीन",...],[],{}]]]
+    $out = array();
+    foreach ($handles as $lang => $ch) {
+        $body = curl_multi_getcontent($ch);
+        $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        if ($code === 200 && is_string($body) && $body !== '') {
+            $out[$lang] = $body;
+        }
+        curl_multi_remove_handle($multi, $ch);
+        // curl_close() frees the resource on PHP 7.x but is a deprecated no-op
+        // from 8.5. Guarded so both runtimes stay warning-free.
+        if (PHP_VERSION_ID < 80000) {
+            curl_close($ch);
+        }
+    }
+    curl_multi_close($multi);
+
+    return $out;
+}
+
+/**
+ * Pull the candidate list out of one response.
+ * Expected: ["SUCCESS",[["ebin",["एबिन","एबीन",...],[],{}]]]
+ */
+function translit_parse_response($body)
+{
     $json = json_decode($body, true);
     if (!is_array($json) || !isset($json[0]) || $json[0] !== 'SUCCESS') {
-        return null;
+        return array();
     }
     if (!isset($json[1][0][1]) || !is_array($json[1][0][1])) {
-        return null;
+        return array();
     }
 
     $cands = array();
@@ -360,7 +503,7 @@ function translit_fetch_candidates($word)
             $cands[] = $cand;
         }
     }
-    return $cands ? $cands : null;
+    return $cands;
 }
 
 /**
