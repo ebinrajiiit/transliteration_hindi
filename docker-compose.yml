@@ -9,6 +9,8 @@
 services:
   db:
     image: mysql:8.0
+    # Survive a host reboot without anyone having to log in and start it.
+    restart: unless-stopped
     # The server defaults matter. A MySQL that defaults to latin1 will accept
     # utf8mb4 columns but hand back mangled bytes on any connection that does
     # not override the charset — exactly the failure this project exists to
@@ -33,6 +35,7 @@ services:
       - db-data:/var/lib/mysql
 
   app:
+    restart: unless-stopped
     build:
       context: .
       args:
