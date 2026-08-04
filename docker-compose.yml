@@ -1,0 +1,56 @@
+# Local testing stack: the app plus a MySQL that is utf8mb4 from the start.
+#
+#   docker compose up --build
+#   open http://localhost:8000/
+#
+# Run the verification suite inside the container:
+#   docker compose exec app php selftest.php
+
+services:
+  db:
+    image: mysql:8.0
+    # The server defaults matter. A MySQL that defaults to latin1 will accept
+    # utf8mb4 columns but hand back mangled bytes on any connection that does
+    # not override the charset — exactly the failure this project exists to
+    # avoid. Set it at the server, not just per connection.
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpw
+      MYSQL_DATABASE: translit_demo
+      MYSQL_USER: translit
+      MYSQL_PASSWORD: translit
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-prootpw"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    volumes:
+      - db-data:/var/lib/mysql
+
+  app:
+    build:
+      context: .
+      args:
+        # Override to 7.4 to check the legacy compatibility CLAUDE.md requires:
+        #   docker compose build --build-arg PHP_VERSION=7.4
+        PHP_VERSION: "8.2"
+    ports:
+      - "8000:80"
+    environment:
+      TRANSLIT_DB_HOST: db
+      TRANSLIT_DB_PORT: "3306"
+      TRANSLIT_DB_NAME: translit_demo
+      TRANSLIT_DB_USER: translit
+      TRANSLIT_DB_PASS: translit
+      # 1 shows errors in the browser — useful for a test deployment, never
+      # for a real one.
+      TRANSLIT_DEBUG: "1"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  db-data:

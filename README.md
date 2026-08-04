@@ -24,6 +24,35 @@ php selftest.php         # exits non-zero if anything fails
 
 or open <http://localhost:8000/selftest.php>.
 
+### Or with Docker
+
+Needs nothing but Docker — no PHP or MySQL on the host:
+
+```bash
+docker compose up --build
+```
+
+Then <http://localhost:8000/>. The MySQL service is started with
+`--character-set-server=utf8mb4`, because a server defaulting to latin1 will
+accept utf8mb4 columns and still hand back mangled bytes to any connection that
+does not override the charset.
+
+Run the suite inside the container:
+
+```bash
+docker compose exec app php selftest.php
+```
+
+To verify the PHP 7.4 compatibility this project targets:
+
+```bash
+docker compose build --build-arg PHP_VERSION=7.4
+```
+
+> The Docker files are schema-validated but have **not** been run end to end —
+> the Docker daemon would not start on the machine they were written on. Expect
+> to debug the first `docker compose up`.
+
 ### Configuration
 
 Everything is overridable by environment variable — no need to edit a tracked
