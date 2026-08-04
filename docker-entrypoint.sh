@@ -33,12 +33,19 @@ if [ -n "$DATABASE_URL" ] && [ -z "$TRANSLIT_DB_HOST_EXPLICIT" ]; then
     echo "[entrypoint] using DATABASE_URL -> ${TRANSLIT_DB_USER}@${TRANSLIT_DB_HOST}:${TRANSLIT_DB_PORT}/${TRANSLIT_DB_NAME}"
 fi
 
-echo "[entrypoint] waiting for MySQL at ${TRANSLIT_DB_HOST}:${TRANSLIT_DB_PORT}"
+if [ -n "$TRANSLIT_DB_SOCKET" ]; then
+    echo "[entrypoint] waiting for MySQL on socket ${TRANSLIT_DB_SOCKET}"
+else
+    echo "[entrypoint] waiting for MySQL at ${TRANSLIT_DB_HOST}:${TRANSLIT_DB_PORT}"
+fi
 i=0
 until php -r '
+    $s = getenv("TRANSLIT_DB_SOCKET");
     $h = getenv("TRANSLIT_DB_HOST"); $p = getenv("TRANSLIT_DB_PORT");
     $u = getenv("TRANSLIT_DB_USER"); $w = getenv("TRANSLIT_DB_PASS");
-    try { new PDO("mysql:host=$h;port=$p;charset=utf8mb4", $u, $w); exit(0); }
+    $dsn = $s ? "mysql:unix_socket=$s;charset=utf8mb4"
+              : "mysql:host=$h;port=$p;charset=utf8mb4";
+    try { new PDO($dsn, $u, $w); exit(0); }
     catch (Exception $e) { exit(1); }
 ' 2>/dev/null; do
     i=$((i + 1))

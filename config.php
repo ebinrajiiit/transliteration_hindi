@@ -20,6 +20,10 @@ return array(
         'user'    => env_or('TRANSLIT_DB_USER', 'root'),
         // Empty password is the Homebrew MySQL default; getenv('')===false handled above.
         'pass'    => getenv('TRANSLIT_DB_PASS') === false ? '' : getenv('TRANSLIT_DB_PASS'),
+        // Set to /cloudsql/PROJECT:REGION:INSTANCE on Cloud Run or App Engine,
+        // where Cloud SQL is reached over a Unix socket rather than TCP. When
+        // this is set, host and port are ignored.
+        'socket'  => env_or('TRANSLIT_DB_SOCKET', ''),
         'charset' => 'utf8mb4',
         'collate' => 'utf8mb4_unicode_ci',
     ),

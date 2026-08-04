@@ -10,10 +10,21 @@
 
 function db_dsn(array $db, $with_database = true)
 {
-    $dsn = 'mysql:host=' . $db['host'] . ';port=' . $db['port'] . ';';
+    // Cloud Run reaches Cloud SQL over a Unix socket mounted at
+    // /cloudsql/PROJECT:REGION:INSTANCE — there is no host/port to connect to.
+    // App Engine and Cloud SQL Auth Proxy behave the same way. Everywhere else
+    // uses TCP.
+    if (!empty($db['socket'])) {
+        $dsn = 'mysql:unix_socket=' . $db['socket'] . ';';
+    } else {
+        $dsn = 'mysql:host=' . $db['host'] . ';port=' . $db['port'] . ';';
+    }
+
     if ($with_database) {
         $dsn .= 'dbname=' . $db['name'] . ';';
     }
+
+    // The charset belongs in the DSN on both paths. See CLAUDE.md section 4.
     $dsn .= 'charset=' . $db['charset'];
     return $dsn;
 }
