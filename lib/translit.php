@@ -64,6 +64,69 @@ function translit_rank_candidates(array $cands)
     return array_merge($good, $bad);
 }
 
+/**
+ * Candidates for a single Latin letter standing alone — an initial.
+ *
+ * "Titus J Sam" must give "टाइटस जे सैम". The J is read aloud as the *name* of the
+ * letter ("jay" -> जे), not as the /dʒ/ *sound* it makes inside a word (ज).
+ *
+ * The upstream endpoint cannot express this, and no transliteration engine can:
+ * a bare "J" is genuinely ambiguous, and only the surrounding context — a
+ * one-letter token in a person's name — settles it. That context is ours, not the
+ * engine's. Measured against the live endpoint, only 4 of 26 letters came back as
+ * the letter name (B, D, Q, T); feeding it the spoken name instead does not help
+ * either ("jay" -> जय, "double u" -> डबल ु). So this is a lookup table, and it is
+ * the right tool: 26 bounded cases, deterministic, and no network call.
+ *
+ * The letter name leads and the phonetic reading follows, so the previous
+ * behaviour stays one click away — CLAUDE.md section 5 says offer the choice,
+ * never impose it. Every entry carries at least two candidates on purpose:
+ * assets/app.js renders no chip row for a token with fewer than two, which would
+ * leave the user no visible way to override.
+ *
+ * @return array|null  Candidates, or null when this is not a single letter, in
+ *                     which case the caller carries on to the normal path.
+ */
+function translit_letter_candidates($word)
+{
+    static $names = array(
+        'a' => array('ए', 'आ', 'अ'),
+        'b' => array('बी', 'ब'),
+        'c' => array('सी', 'क', 'च'),
+        'd' => array('डी', 'ड', 'द'),
+        'e' => array('ई', 'ए', 'इ'),
+        'f' => array('एफ', 'फ', 'फ़'),
+        'g' => array('जी', 'ग', 'घ'),
+        'h' => array('एच', 'ह'),
+        'i' => array('आई', 'ई', 'इ'),
+        'j' => array('जे', 'ज', 'ज़'),
+        'k' => array('के', 'क', 'ख'),
+        'l' => array('एल', 'ल'),
+        'm' => array('एम', 'म'),
+        'n' => array('एन', 'न'),
+        'o' => array('ओ', 'आ'),
+        'p' => array('पी', 'प', 'फ'),
+        'q' => array('क्यू', 'क़', 'क'),
+        'r' => array('आर', 'र'),
+        's' => array('एस', 'स', 'श'),
+        't' => array('टी', 'ट', 'त'),
+        'u' => array('यू', 'उ', 'ऊ'),
+        'v' => array('वी', 'व'),
+        'w' => array('डब्ल्यू', 'व'),
+        'x' => array('एक्स', 'क्ष'),
+        'y' => array('वाई', 'य'),
+        'z' => array('ज़ेड', 'जेड', 'ज़'),
+    );
+
+    // Character count, not byte count — see CLAUDE.md section 4, trap 3.
+    if (mb_strlen($word, 'UTF-8') !== 1) {
+        return null;
+    }
+
+    $key = mb_strtolower($word, 'UTF-8');
+    return isset($names[$key]) ? $names[$key] : null;
+}
+
 /* ------------------------------------------------------------------ *
  * Cache
  * ------------------------------------------------------------------ */
@@ -194,6 +257,16 @@ function translit_word($word)
         return array('candidates' => array($word), 'source' => 'passthrough');
     }
 
+    // Initials are resolved locally and must be checked BEFORE the cache: rows
+    // written by earlier versions (the live cache already holds k => ["क",...]
+    // and p => ["प",...]) would otherwise win and reinstate the wrong spelling.
+    // Checking first also makes those rows permanently inert, so no purge is
+    // needed.
+    $letter = translit_letter_candidates($word);
+    if ($letter !== null) {
+        return array('candidates' => $letter, 'source' => 'letter');
+    }
+
     // Ranking is applied on read, not on write, so cache rows written before a
     // ranking change are corrected too.
     $cached = translit_cache_get($word);
@@ -240,7 +313,14 @@ function translit_phrase($text)
             continue;
         }
 
-        if ($offline) {
+        // Checked ahead of the circuit breaker below, which reads the cache
+        // directly and never enters translit_word(). Without this, an initial
+        // appearing after a failed lookup would still come back wrong.
+        $letter = translit_letter_candidates($tok['t']);
+
+        if ($letter !== null) {
+            $res = array('candidates' => $letter, 'source' => 'letter');
+        } elseif ($offline) {
             // Circuit breaker. The service has already failed once for this
             // phrase, so do not spend another full connect timeout on every
             // remaining word — a three-word name would otherwise stall for

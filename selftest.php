@@ -319,6 +319,51 @@ check($G, 'transliteration failure leaves an empty, editable field (not an excep
       $probe['hindi'] === '' || has_devanagari($probe['hindi']),
       'no throw on either path');
 
+/* Initials. These resolve from a local table, so they are checked outside the
+ * "upstream reachable" branch above — they must hold offline too. A single
+ * letter is read as the NAME of the letter (J -> जे), not the sound it makes
+ * inside a word (ज). */
+
+$init = translit_phrase('Titus J Sam');
+$j_tok = null;
+foreach ($init['tokens'] as $t) {
+    if (!empty($t['word']) && $t['en'] === 'J') {
+        $j_tok = $t;
+    }
+}
+check($G, 'a lone "J" transliterates as जे, not ज',
+      $j_tok && $j_tok['chosen'] === 'जे',
+      $j_tok ? 'Titus J Sam -> ' . $init['hindi'] : 'J token not found');
+
+check($G, 'the phonetic reading stays available as an alternative',
+      $j_tok && in_array('ज', $j_tok['candidates'], true),
+      $j_tok ? implode(' | ', $j_tok['candidates']) : '');
+
+$pk = translit_phrase('P.K. Sreekumar');
+check($G, 'consecutive initials with periods each resolve',
+      mb_strpos($pk['hindi'], 'पी.के.', 0, 'UTF-8') === 0, $pk['hindi']);
+
+/* Every letter must offer at least two candidates: assets/app.js renders no
+ * chip row below two, which would leave no visible way to override. */
+$bad_letters = array();
+foreach (str_split('abcdefghijklmnopqrstuvwxyz') as $ch) {
+    $c = translit_letter_candidates($ch);
+    if (!$c || count($c) < 2 || preg_match('/^\p{M}/u', $c[0])) {
+        $bad_letters[] = $ch;
+    }
+}
+check($G, 'all 26 letters have a well-formed name and an alternative',
+      !$bad_letters, $bad_letters ? implode(', ', $bad_letters) : '26/26');
+
+check($G, 'case is ignored for initials',
+      translit_letter_candidates('j') === translit_letter_candidates('J'),
+      'J and j agree');
+
+check($G, 'multi-letter tokens are left to the engine',
+      translit_letter_candidates('PK') === null
+      && translit_letter_candidates('Raj') === null,
+      'PK and Raj not treated as initials');
+
 /* ---------------------------------------------------------------- *
  * Cleanup
  * ---------------------------------------------------------------- */
