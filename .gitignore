@@ -1,0 +1,21 @@
+# Composer — only needed if mpdf is installed for server-side PDF.
+# The receiver runs `composer install` rather than pulling this from git.
+/vendor/
+composer.lock
+
+# macOS
+.DS_Store
+._*
+
+# Editors
+.idea/
+.vscode/
+*.swp
+
+# Local overrides. Configuration is env-driven (see config.php); never commit
+# real database credentials.
+.env
+config.local.php
+
+# Runtime
+*.log

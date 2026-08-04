@@ -1,0 +1,149 @@
+/* Devanagari needs an explicit font stack or the browser falls back to
+   something that renders conjuncts badly. See CLAUDE.md section 9. */
+
+:root {
+  --bg:      #f6f7f9;
+  --card:    #ffffff;
+  --ink:     #1b1d21;
+  --dim:     #6b7076;
+  --line:    #e2e5e9;
+  --accent:  #1a56c4;
+  --ok:      #137333;
+  --bad:     #c5221f;
+  --warnbg:  #fff4e5;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0 auto;
+  padding: 2rem 1.25rem 4rem;
+  max-width: 60rem;
+  background: var(--bg);
+  color: var(--ink);
+  font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.devanagari {
+  font-family: "Noto Sans Devanagari", "Nirmala UI", system-ui, sans-serif;
+}
+.big { font-size: 1.15rem; }
+
+.page-head h1 { margin: 0 0 .25rem; font-size: 1.5rem; letter-spacing: -.01em; }
+.page-head .sub { margin: 0 0 1.5rem; color: var(--dim); }
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 1.25rem 1.25rem 1.5rem;
+  margin-bottom: 1.5rem;
+}
+.card h2 { margin: 0 0 1rem; font-size: 1.05rem; }
+.card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; flex-wrap: wrap; }
+.card-head h2 { margin-bottom: .75rem; }
+.count {
+  font-weight: 400; color: var(--dim); background: var(--bg);
+  border-radius: 99px; padding: .1rem .5rem; font-size: .8rem;
+}
+.exports { display: flex; gap: .9rem; font-size: .85rem; }
+.exports a { color: var(--accent); text-decoration: none; }
+.exports a:hover { text-decoration: underline; }
+
+.field { margin-bottom: 1.1rem; }
+.field label { display: block; font-weight: 600; font-size: .85rem; margin-bottom: .35rem; }
+.field input[type=text] {
+  width: 100%; padding: .6rem .7rem; font-size: 1rem;
+  border: 1px solid #c9ced4; border-radius: 6px; background: #fff; color: var(--ink);
+}
+.field input[type=text]:focus {
+  outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(26,86,196,.15);
+}
+.hint { margin: .35rem 0 0; font-size: .8rem; color: var(--dim); }
+
+.status { font-weight: 400; font-size: .78rem; margin-left: .5rem; }
+.status.busy   { color: var(--dim); }
+.status.ok     { color: var(--ok); }
+.status.partial{ color: #9a6700; }
+.status.bad    { color: var(--bad); }
+.status.manual { color: var(--accent); }
+
+.candidates {
+  border: 1px solid var(--line); border-radius: 8px;
+  padding: .75rem .85rem; margin-bottom: 1.1rem; background: #fbfcfd;
+}
+.cand-lead { margin: 0 0 .5rem; font-size: .8rem; color: var(--dim); }
+.cand-row { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; margin-bottom: .45rem; }
+.cand-label {
+  font-size: .78rem; color: var(--dim); min-width: 5.5rem;
+  font-family: ui-monospace, Menlo, monospace;
+}
+.chip {
+  border: 1px solid #ccd2d9; background: #fff; border-radius: 99px;
+  padding: .25rem .65rem; font-size: .95rem; cursor: pointer; color: var(--ink);
+}
+.chip:hover { border-color: var(--accent); }
+.chip.chosen { background: var(--accent); border-color: var(--accent); color: #fff; }
+.cand-warn {
+  margin: .5rem 0 0; font-size: .78rem; color: #9a6700;
+  background: var(--warnbg); border-radius: 5px; padding: .4rem .55rem;
+}
+
+.actions { display: flex; align-items: center; gap: .75rem; }
+button.primary {
+  background: var(--accent); color: #fff; border: 0; border-radius: 6px;
+  padding: .55rem 1.4rem; font-size: .92rem; font-weight: 600; cursor: pointer;
+}
+button.secondary {
+  background: #fff; color: var(--ink); border: 1px solid #c9ced4;
+  border-radius: 6px; padding: .5rem .9rem; font-size: .85rem; cursor: pointer;
+}
+.btn-link { color: var(--dim); font-size: .87rem; text-decoration: none; }
+
+.flash { padding: .65rem .85rem; border-radius: 6px; font-size: .88rem; margin: 0 0 1.25rem; }
+.flash.ok  { background: #e6f4ea; color: var(--ok); }
+.flash.bad { background: #fce8e6; color: var(--bad); padding-left: 2rem; }
+
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+th {
+  text-align: left; font-size: .74rem; text-transform: uppercase;
+  letter-spacing: .04em; color: var(--dim); font-weight: 600;
+  border-bottom: 1px solid var(--line); padding: .4rem .6rem .5rem;
+}
+td { padding: .55rem .6rem; border-bottom: 1px solid #f0f2f4; vertical-align: middle; }
+tr:last-child td { border-bottom: 0; }
+.mono { font-family: ui-monospace, Menlo, monospace; font-size: .8rem; }
+.dim  { color: var(--dim); }
+.good { color: var(--ok); }
+.warn { color: var(--bad); font-weight: 700; }
+.empty { color: var(--dim); font-size: .9rem; margin: 0; }
+
+.row-actions { display: flex; gap: .7rem; align-items: center; white-space: nowrap; }
+.row-actions a { color: var(--accent); font-size: .82rem; text-decoration: none; }
+form.inline { display: inline; }
+.link-danger {
+  background: none; border: 0; color: var(--bad); font-size: .82rem;
+  cursor: pointer; padding: 0; font-family: inherit;
+}
+
+.page-foot { color: var(--dim); font-size: .8rem; }
+.page-foot code { background: #eceff2; padding: .1rem .3rem; border-radius: 3px; }
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #16181c; --card: #1e2126; --ink: #e6e8ea; --dim: #9aa0a6;
+    --line: #2c3036; --accent: #6ea0ff; --ok: #6bbf7b; --bad: #ff8a80;
+    --warnbg: #3a2f18;
+  }
+  .field input[type=text] { background: #14161a; border-color: #363b42; color: var(--ink); }
+  .candidates { background: #191c20; }
+  .chip { background: #14161a; border-color: #363b42; color: var(--ink); }
+  .chip.chosen { background: var(--accent); color: #10131a; }
+  button.secondary { background: #14161a; border-color: #363b42; color: var(--ink); }
+  button.primary { color: #10131a; }
+  .flash.ok { background: #16301f; }
+  .flash.bad { background: #3a1d1b; }
+  td { border-bottom-color: #24282e; }
+  .page-foot code { background: #24282e; }
+}
