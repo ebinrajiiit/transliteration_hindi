@@ -33,17 +33,26 @@ function person_validate($name_en, $name_hi)
     return $errors;
 }
 
+/**
+ * A saved record is a human-approved spelling, which is exactly the signal the
+ * engine lacks. Learning from it is what makes the app improve with use.
+ * translit_learn() is deliberately conservative and never throws.
+ */
 function person_insert($name_en, $name_hi)
 {
     $st = db()->prepare('INSERT INTO persons (name_en, name_hi) VALUES (?, ?)');
     $st->execute(array(trim($name_en), trim($name_hi)));
-    return (int) db()->lastInsertId();
+    $id = (int) db()->lastInsertId();
+    translit_learn(trim($name_en), trim($name_hi));
+    return $id;
 }
 
 function person_update($id, $name_en, $name_hi)
 {
     $st = db()->prepare('UPDATE persons SET name_en = ?, name_hi = ? WHERE id = ?');
     $st->execute(array(trim($name_en), trim($name_hi), (int) $id));
+    // An edit is a correction — the strongest signal there is.
+    translit_learn(trim($name_en), trim($name_hi));
 }
 
 function person_delete($id)

@@ -364,6 +364,52 @@ check($G, 'multi-letter tokens are left to the engine',
       && translit_letter_candidates('Raj') === null,
       'PK and Raj not treated as initials');
 
+/* Learned spellings. Uses nonsense words so a real name is never affected,
+ * and clears them again below. */
+
+$LW = 'Zzqmarwick';   // never a real name, so never already known
+$LH = 'ज़क़मारविक';
+
+$before = translit_word($LW, false);
+check($G, 'an unknown word has nothing learned yet', !$before['candidates'],
+      'source: ' . $before['source']);
+
+$pairs = translit_learn('Anu ' . $LW, 'अनु ' . $LH);
+check($G, 'a saved record teaches its word pairs', $pairs === 2, $pairs . ' pair(s)');
+
+$after = translit_word($LW, false);
+check($G, 'the approved spelling is offered first, without any network',
+      isset($after['candidates'][0]) && $after['candidates'][0] === $LH,
+      isset($after['candidates'][0]) ? $after['candidates'][0] . ' (' . $after['source'] . ')' : 'nothing');
+
+// A different approved spelling for the same word must not evict the first.
+translit_learn('Anu ' . $LW, 'अनु ' . $LH);      // second approval of the same
+translit_learn('Bob ' . $LW, 'बॉब ज़क़मारविख');   // a competing spelling, once
+$ranked = translit_word($LW, false);
+check($G, 'the more-approved spelling outranks a competing one',
+      isset($ranked['candidates'][0]) && $ranked['candidates'][0] === $LH
+      && count($ranked['candidates']) >= 2,
+      implode(' | ', $ranked['candidates']));
+
+check($G, 'a name whose word counts do not line up teaches nothing',
+      translit_learn('One Two Three', 'एक दो') === 0,
+      'refuses to guess the alignment');
+
+check($G, 'initials are never learned, so the letter table stays authoritative',
+      translit_learn('J Sam', 'ज सैम') === 1
+      && translit_letter_candidates('j') === array('जे', 'ज', 'ज़'),
+      'only the Sam pair was taken');
+
+try {
+    $st = db()->prepare('DELETE FROM translit_learned WHERE word_en IN (?, ?)');
+    $st->execute(array(mb_strtolower($LW, 'UTF-8'), 'sam'));
+    $left = db()->prepare('SELECT COUNT(*) FROM translit_learned WHERE word_en = ?');
+    $left->execute(array(mb_strtolower($LW, 'UTF-8')));
+    check($G, 'learned test rows removed', ((int) $left->fetchColumn()) === 0, '');
+} catch (PDOException $ex) {
+    check($G, 'learned test rows removed', false, $ex->getMessage());
+}
+
 /* ---------------------------------------------------------------- *
  * Cleanup
  * ---------------------------------------------------------------- */

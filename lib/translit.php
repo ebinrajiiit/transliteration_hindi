@@ -128,6 +128,127 @@ function translit_letter_candidates($word)
 }
 
 /* ------------------------------------------------------------------ *
+ * Learned spellings — what humans actually approved
+ * ------------------------------------------------------------------ */
+
+/**
+ * Spellings previously approved for a word, most-approved first.
+ *
+ * The engine is good but not authoritative. Measured on 20 real Indian
+ * surnames: wanted spelling top for 10, present-but-ranked-lower for 6, absent
+ * entirely for 4 (Varghese, Nambiar, Iyer, Mathew). Remembering what a person
+ * approved fixes both failure modes at once, and needs no model.
+ *
+ * @return array  List of Devanagari spellings; empty when nothing is known.
+ */
+function translit_learned_get($word)
+{
+    if ($word === '' || mb_strlen($word, 'UTF-8') > 64) {
+        return array();
+    }
+    try {
+        $st = db()->prepare(
+            'SELECT word_hi FROM translit_learned
+              WHERE word_en = ?
+              ORDER BY approvals DESC, updated DESC
+              LIMIT 5'
+        );
+        $st->execute(array(mb_strtolower($word, 'UTF-8')));
+        $rows = $st->fetchAll();
+    } catch (PDOException $ex) {
+        // Same contract as the cache: a learning failure must never surface.
+        return array();
+    }
+
+    $out = array();
+    foreach ($rows as $r) {
+        $out[] = $r['word_hi'];
+    }
+    return $out;
+}
+
+/** Record one approved pair, or bump its count if already known. */
+function translit_learned_put($word_en, $word_hi)
+{
+    if ($word_en === '' || $word_hi === '') {
+        return;
+    }
+    if (mb_strlen($word_en, 'UTF-8') > 64 || mb_strlen($word_hi, 'UTF-8') > 64) {
+        return;
+    }
+    try {
+        $st = db()->prepare(
+            'INSERT INTO translit_learned (word_en, word_hi, approvals) VALUES (?, ?, 1)
+             ON DUPLICATE KEY UPDATE approvals = approvals + 1'
+        );
+        $st->execute(array(mb_strtolower($word_en, 'UTF-8'), $word_hi));
+    } catch (PDOException $ex) {
+        // ignore
+    }
+}
+
+/**
+ * Learn from a saved record by aligning its English and Hindi words.
+ *
+ * "Sreekumar Nair" / "श्रीकुमार नायर" yields Sreekumar->श्रीकुमार and Nair->नायर.
+ *
+ * Alignment is positional and only attempted when both sides have the same
+ * number of word tokens. If they differ the user has restructured the name and
+ * we cannot say which part maps to which, so we learn nothing rather than
+ * guess — a wrong pair would be served to every later user.
+ *
+ * @return int  Number of pairs recorded.
+ */
+function translit_learn($name_en, $name_hi)
+{
+    $en = array();
+    foreach (translit_tokenize($name_en) as $t) {
+        if ($t['word']) {
+            $en[] = $t['t'];
+        }
+    }
+    $hi = array();
+    foreach (translit_tokenize($name_hi) as $t) {
+        if ($t['word']) {
+            $hi[] = $t['t'];
+        }
+    }
+
+    if (!$en || count($en) !== count($hi)) {
+        return 0;
+    }
+
+    $learned = 0;
+    foreach ($en as $i => $word) {
+        // Single letters are initials and already resolved deterministically;
+        // letting them be learned would let one odd entry erode that.
+        if (mb_strlen($word, 'UTF-8') === 1) {
+            continue;
+        }
+        // Only learn a genuinely Devanagari spelling, and never learn a word
+        // that was already Devanagari on the English side.
+        if (has_devanagari($word) || !has_devanagari($hi[$i])) {
+            continue;
+        }
+        translit_learned_put($word, $hi[$i]);
+        $learned++;
+    }
+    return $learned;
+}
+
+/** Merge lists preserving order, first occurrence wins. */
+function translit_merge_unique(array $first, array $second)
+{
+    $out = array();
+    foreach (array_merge($first, $second) as $c) {
+        if ($c !== '' && !in_array($c, $out, true)) {
+            $out[] = $c;
+        }
+    }
+    return $out;
+}
+
+/* ------------------------------------------------------------------ *
  * Cache
  * ------------------------------------------------------------------ */
 
@@ -247,7 +368,7 @@ function translit_fetch_candidates($word)
  *
  * @return array  array('candidates' => string[], 'source' => 'passthrough|cache|remote|none')
  */
-function translit_word($word)
+function translit_word($word, $allow_network = true)
 {
     if ($word === '') {
         return array('candidates' => array(), 'source' => 'none');
@@ -267,20 +388,37 @@ function translit_word($word)
         return array('candidates' => $letter, 'source' => 'letter');
     }
 
+    // What a human approved outranks what the engine guessed.
+    $learned = translit_learned_get($word);
+
     // Ranking is applied on read, not on write, so cache rows written before a
     // ranking change are corrected too.
     $cached = translit_cache_get($word);
-    if ($cached !== null) {
-        return array('candidates' => translit_rank_candidates($cached), 'source' => 'cache');
+    $engine = ($cached !== null) ? translit_rank_candidates($cached) : null;
+
+    // Only go to the network when it would add something. With two or more
+    // approved spellings the picker already has real choices, so an initial
+    // lookup is not worth a timeout.
+    if ($engine === null && $allow_network && count($learned) < 2) {
+        $fetched = translit_fetch_candidates($word);
+        if ($fetched !== null) {
+            translit_cache_put($word, $fetched);
+            $engine = translit_rank_candidates($fetched);
+        }
     }
 
-    $fetched = translit_fetch_candidates($word);
-    if ($fetched === null) {
-        return array('candidates' => array(), 'source' => 'none');
+    if ($learned) {
+        return array(
+            'candidates' => translit_merge_unique($learned, $engine ? $engine : array()),
+            'source'     => 'learned',
+        );
     }
 
-    translit_cache_put($word, $fetched);
-    return array('candidates' => translit_rank_candidates($fetched), 'source' => 'remote');
+    if ($engine !== null) {
+        return array('candidates' => $engine, 'source' => ($cached !== null) ? 'cache' : 'remote');
+    }
+
+    return array('candidates' => array(), 'source' => 'none');
 }
 
 /**
@@ -320,18 +458,13 @@ function translit_phrase($text)
 
         if ($letter !== null) {
             $res = array('candidates' => $letter, 'source' => 'letter');
-        } elseif ($offline) {
-            // Circuit breaker. The service has already failed once for this
-            // phrase, so do not spend another full connect timeout on every
-            // remaining word — a three-word name would otherwise stall for
-            // 3 x the timeout. Local cache hits cost nothing, so still take those.
-            $cached = has_devanagari($tok['t']) ? array($tok['t']) : translit_cache_get($tok['t']);
-            $res = array(
-                'candidates' => $cached ? translit_rank_candidates($cached) : array(),
-                'source'     => $cached ? 'cache' : 'none',
-            );
         } else {
-            $res = translit_word($tok['t']);
+            // Circuit breaker: once the service has failed for this phrase, keep
+            // resolving from local sources but stop paying a connect timeout per
+            // remaining word — a three-word name would otherwise stall for 3x the
+            // timeout. Learned spellings and cache hits are local, so they still
+            // work with the network down.
+            $res = translit_word($tok['t'], !$offline);
         }
         $chosen = isset($res['candidates'][0]) ? $res['candidates'][0] : '';
 

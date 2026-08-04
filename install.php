@@ -69,6 +69,19 @@ try {
     );
     say('Table `translit_cache` ready', 'ok');
 
+    // VARCHAR(64) because both columns are in the PRIMARY KEY; see schema.sql.
+    $pdo->exec(
+        'CREATE TABLE IF NOT EXISTS `translit_learned` (
+           `word_en`   VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+           `word_hi`   VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+           `approvals` INT NOT NULL DEFAULT 1,
+           `updated`   TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+           PRIMARY KEY (`word_en`, `word_hi`),
+           KEY `idx_word_en` (`word_en`)
+         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC'
+    );
+    say('Table `translit_learned` ready', 'ok');
+
     // Confirm the live session really is utf8mb4 on every axis.
     $vars = $pdo->query("SHOW VARIABLES LIKE 'character_set%'")->fetchAll();
     $must = array('character_set_client', 'character_set_connection', 'character_set_results');
